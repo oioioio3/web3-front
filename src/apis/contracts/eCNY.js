@@ -25,6 +25,7 @@ export const initWeb = async () => {
     }
 }
 
+
 export const getBalanceOf = async (account) => {
     const balance = await eCNY.value.methods.balanceOf(account).call();
     return balance;
