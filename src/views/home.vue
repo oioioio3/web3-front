@@ -156,86 +156,127 @@ const shortenAddress = (address) => {
   return address.substring(0, 6) + '...' + address.substring(address.length - 4);
 };
 
+// 格式化ECNY余额显示，将整数值转换为带6位小数的格式
+const formatEcnyBalance = (balance) => {
+  if (!balance) return '0';
+  // 将整数值转换为带6位小数的格式，不四舍五入
+  const balanceStr = balance.toString();
+  if (balanceStr.length <= 6) {
+    // 如果小于百万，前面补零
+    return '0.' + balanceStr.padStart(6, '0');
+  } else {
+    // 大于等于百万，分割成整数和小数部分
+    const intPart = balanceStr.slice(0, balanceStr.length - 6);
+    const decPart = balanceStr.slice(balanceStr.length - 6);
+    return intPart + '.' + decPart;
+  }
+};
+
+// 确保价格显示6位小数
+const formatPriceDisplay = (price) => {
+  if (!price) return '0.000000';
+  return Number(price).toFixed(6);
+};
+
+// 格式化商品价格显示，与formatEcnyBalance相反
+// 在显示处：合约值 1000000 显示为 1.000000 eCNY
+// 而用户录入的值 1.000000 在合约中存储为 1000000
+const formatItemPrice = (price) => {
+  if (!price) return '0';
+  // 将数值乘以1000000以变成正确的显示价格
+  return (Number(price) * 1000000).toString();
+};
+
 // 方法：加载市场数据
 const loadMarketData = async () => {
   try {
     loading.value = true;
     errorMsg.value = '';
     
-    const balance = await getBalanceApi('0xD679224b4B2512A878Ef12386132e6A4d6e05dBb');
-    userBalances.value.walletBalance = balance;
-    console.log("用户的钱包余额" + balance);
-
     const accounts = await initWeb();
-    console.log("用户的账户" + accounts[0]);
+    console.log("用户的账户", accounts && accounts.length > 0 ? accounts[0] : "未连接");
+    
+    if (accounts && accounts.length > 0) {
+      // 使用当前连接的账户地址
+      const currentUserAddress = accounts[0];
+      
+      // 获取以太坊余额
+      const balance = await getBalanceApi(currentUserAddress);
+      userBalances.value.walletBalance = balance;
+      console.log("用户的钱包余额:", balance);
 
-    const token = await getBalanceOf("0xD679224b4B2512A878Ef12386132e6A4d6e05dBb");
-    userBalances.value.tokenBalance = token;
-    console.log("用户的代币数量" + token);
-
-    // 从市场合约获取数据
-    const marketAccounts = await initMarketWeb();
-    if (marketAccounts && marketAccounts.length > 0) {
-      marketData.value.userAddress = marketAccounts[0];
-      console.log("市场合约连接账户：" + marketAccounts[0]);
+      // 获取eCNY代币余额
+      const token = await getBalanceOf(currentUserAddress);
+      userBalances.value.tokenBalance = token;
+      console.log("用户的eCNY代币数量:", token);
       
-      // const marketToken = await getMarketBalanceOf(marketAccounts[0]);
-      // userBalances.value.marketTokenBalance = marketToken;
-      // console.log("用户在市场合约中的代币数量：" + marketToken);
-      
-      // 获取用户信誉
-      userReputation.value = await getUserReputation(marketAccounts[0]);
-      console.log("用户信誉:", userReputation.value);
-      
-      // 获取市场商品总数
-      const itemCount = await getTotalItemCount();
-      marketData.value.itemCount = itemCount;
-      console.log("市场商品总数：" + itemCount);
-      
-      // 获取交易总数
-      const transactionCount = await getTransactionCount();
-      marketData.value.transactionCount = transactionCount;
-      console.log("交易总数：" + transactionCount);
-      
-      // 获取市场状态
-      const isActive = await getMarketStatus();
-      marketData.value.marketActive = isActive;
-      console.log("市场是否激活：" + isActive);
-      
-      // 获取用户拥有的商品
-      const userItems = await getUserItems(marketAccounts[0]);
-      marketData.value.userItems = userItems;
-      console.log("用户拥有的商品ID：", userItems);
-      
-      // 获取商品详情
-      marketData.value.itemDetails = [];
-      if (userItems && userItems.length > 0) {
-        for (let i = 0; i < userItems.length; i++) {
-          const itemInfo = await getItemInfo(userItems[i]);
-          if (itemInfo) {
-            marketData.value.itemDetails.push(itemInfo);
-            console.log(`商品${userItems[i]}信息:`, itemInfo);
+      // 从市场合约获取数据
+      const marketAccounts = await initMarketWeb();
+      if (marketAccounts && marketAccounts.length > 0) {
+        marketData.value.userAddress = marketAccounts[0];
+        console.log("市场合约连接账户：" + marketAccounts[0]);
+        
+        // 获取用户信誉
+        userReputation.value = await getUserReputation(marketAccounts[0]);
+        console.log("用户信誉:", userReputation.value);
+        
+        // 获取市场商品总数
+        const itemCount = await getTotalItemCount();
+        marketData.value.itemCount = itemCount;
+        console.log("市场商品总数：" + itemCount);
+        
+        // 获取交易总数
+        const transactionCount = await getTransactionCount();
+        marketData.value.transactionCount = transactionCount;
+        console.log("交易总数：" + transactionCount);
+        
+        // 获取市场状态
+        const isActive = await getMarketStatus();
+        marketData.value.marketActive = isActive;
+        console.log("市场是否激活：" + isActive);
+        
+        // 获取用户拥有的商品
+        const userItems = await getUserItems(marketAccounts[0]);
+        marketData.value.userItems = userItems;
+        console.log("用户拥有的商品ID：", userItems);
+        
+        // 获取商品详情
+        marketData.value.itemDetails = [];
+        if (userItems && userItems.length > 0) {
+          for (let i = 0; i < userItems.length; i++) {
+            const itemInfo = await getItemInfo(userItems[i]);
+            if (itemInfo) {
+              marketData.value.itemDetails.push(itemInfo);
+              console.log(`商品${userItems[i]}信息:`, itemInfo);
+            }
           }
         }
-      }
-      
-      // 获取所有商品
-      marketData.value.allItems = [];
-      for (let i = 1; i <= itemCount + 1; i++) {
-        try {
-          const itemInfo = await getItemInfo(i.toString());
-          if (itemInfo && itemInfo.active) {
-            marketData.value.allItems.push(itemInfo);
+        
+        // 获取所有商品
+        marketData.value.allItems = [];
+        for (let i = 1; i <= itemCount + 1; i++) {
+          try {
+            const itemInfo = await getItemInfo(i.toString());
+            if (itemInfo && itemInfo.active) {
+              marketData.value.allItems.push(itemInfo);
+              console.log(`市场商品${i}信息:`, itemInfo);
+            }
+          } catch (error) {
+            console.error(`获取商品${i}信息失败:`, error);
           }
-        } catch (error) {
-          console.error(`获取商品${i}信息失败:`, error);
         }
+        console.log("加载的市场商品总数:", marketData.value.allItems.length);
+        console.log("市场商品列表:", marketData.value.allItems);
+        
+        // 获取用户的交易
+        const userTransactions = await getUserTransactions(marketAccounts[0]);
+        marketData.value.userTransactions = userTransactions;
+        console.log("用户交易:", userTransactions);
+      } else {
+        errorMsg.value = "请先连接MetaMask钱包";
       }
-      
-      // 获取用户的交易
-      const userTransactions = await getUserTransactions(marketAccounts[0]);
-      marketData.value.userTransactions = userTransactions;
-      console.log("用户交易:", userTransactions);
+    } else {
+      errorMsg.value = "请先连接MetaMask钱包";
     }
   } catch (error) {
     console.error("获取数据时出错:", error);
@@ -1071,12 +1112,12 @@ onMounted(loadMarketData);
             </div>
             <div class="balance-item">
               <span class="balance-label">eCNY余额:</span>
-              <span class="balance-value">{{ userBalances.tokenBalance }} eCNY</span>
+              <span class="balance-value">{{ formatEcnyBalance(userBalances.tokenBalance) }} eCNY</span>
               <button class="mini-button" @click="showTokenInfo = true">获取eCNY</button>
             </div>
             <!-- <div class="balance-item">
               <span class="balance-label">市场代币余额:</span>
-              <span class="balance-value">{{ userBalances.marketTokenBalance }} eCNY</span>
+              <span class="balance-value">{{ formatEcnyBalance(userBalances.marketTokenBalance) }} eCNY</span>
             </div> -->
           </div>
           
@@ -1179,8 +1220,8 @@ onMounted(loadMarketData);
             </div>
             <div class="deposit-summary">
               <h4>保证金计算:</h4>
-              <p>发布此商品需支付的保证金: {{ calculateCreatorDeposit() }} eCNY</p>
-              <p>买家购买此商品需支付的保证金: {{ calculateBuyerDeposit() }} eCNY</p>
+              <p>发布此商品需支付的保证金: {{ formatPriceDisplay(calculateCreatorDeposit()) }} eCNY</p>
+              <p>买家购买此商品需支付的保证金: {{ formatPriceDisplay(calculateBuyerDeposit()) }} eCNY</p>
             </div>
             <div class="form-actions">
               <button class="cancel-button" @click="showPublishForm = false">取消</button>
@@ -1252,7 +1293,7 @@ onMounted(loadMarketData);
               <select v-model="buyForm.itemId">
                 <option value="">-- 请选择商品 --</option>
                 <option v-for="item in marketData.allItems" :key="item.id" :value="item.id">
-                  {{ item.name }} - 价格: {{ item.price }} eCNY - 可用数量: {{ item.availableQuantity }}
+                  {{ item.name }} - 价格: {{ formatEcnyBalance(item.price) }} eCNY - 可用数量: {{ item.availableQuantity }}
                 </option>
               </select>
             </div>
@@ -1270,7 +1311,7 @@ onMounted(loadMarketData);
             <div class="deposit-summary" v-if="buyForm.itemId">
               <h4>交易摘要:</h4>
               <p>商品名称: {{ marketData.allItems.find(item => item.id === buyForm.itemId)?.name }}</p>
-              <p>单价: {{ marketData.allItems.find(item => item.id === buyForm.itemId)?.price }} eCNY</p>
+              <p>单价: {{ formatEcnyBalance(marketData.allItems.find(item => item.id === buyForm.itemId)?.price) }} eCNY</p>
               <p>数量: {{ buyForm.quantity }}</p>
               <p>总金额: {{ (Number(marketData.allItems.find(item => item.id === buyForm.itemId)?.price) * buyForm.quantity).toFixed(6) }} eCNY</p>
               <p>需支付保证金: {{ (Number(marketData.allItems.find(item => item.id === buyForm.itemId)?.price) * Number(marketData.allItems.find(item => item.id === buyForm.itemId)?.buyerDepositMultiplier) * buyForm.quantity).toFixed(6) }} eCNY</p>
@@ -1314,14 +1355,14 @@ onMounted(loadMarketData);
               <div class="item-info">
                 <h3>{{ selectedTransaction.name }}</h3>
                 <p><strong>描述:</strong> {{ selectedTransaction.description }}</p>
-                <p><strong>价格:</strong> {{ selectedTransaction.price }} eCNY</p>
+                <p><strong>价格:</strong> {{ formatPriceDisplay(selectedTransaction.price) }} eCNY</p>
                 <p><strong>数量:</strong> {{ selectedTransaction.quantity }}</p>
                 <p><strong>创建者保证金倍数:</strong> {{ selectedTransaction.creatorDepositMultiplier }}</p>
                 <p><strong>买家保证金倍数:</strong> {{ selectedTransaction.buyerDepositMultiplier }}</p>
                 <!-- 添加质押金额信息 -->
                 <div class="deposit-info transaction-deposit">
-                  <p class="deposit-item"><strong>卖家押金金额:</strong> {{ (Number(selectedTransaction.price) * Number(selectedTransaction.creatorDepositMultiplier)) }} eCNY/个</p>
-                  <p class="deposit-item"><strong>买家押金金额:</strong> {{ (Number(selectedTransaction.price) * Number(selectedTransaction.buyerDepositMultiplier)) }} eCNY/个</p>
+                  <p class="deposit-item"><strong>卖家押金金额:</strong> {{ formatPriceDisplay(Number(selectedTransaction.price) * Number(selectedTransaction.creatorDepositMultiplier)) }} eCNY/个</p>
+                  <p class="deposit-item"><strong>买家押金金额:</strong> {{ formatPriceDisplay(Number(selectedTransaction.price) * Number(selectedTransaction.buyerDepositMultiplier)) }} eCNY/个</p>
                 </div>
                 <p><strong>交易持续时间:</strong> {{ selectedTransaction.durationText }}</p>
                 <p><strong>状态:</strong> {{ getStatusText(selectedTransaction.status) }}</p>
@@ -1341,13 +1382,13 @@ onMounted(loadMarketData);
               <div class="item-info">
                 <h4>{{ item.name }}</h4>
                 <p class="item-description">{{ item.description }}</p>
-                <p class="item-price">价格: {{ item.price }} eCNY</p>
+                <p class="item-price">价格: {{ formatPriceDisplay(item.price) }} eCNY</p>
                 <p class="item-quantity">可用数量: {{ item.availableQuantity }}</p>
                 <p class="item-seller">卖家: {{ item.creator ? shortenAddress(item.creator) : '' }}</p>
                 <!-- 添加质押信息显示 -->
                 <div class="deposit-info">
-                  <p class="deposit-item">卖家押金: <span class="highlight">{{ item.creatorDepositMultiplier }}倍</span> ({{ (Number(item.price) * Number(item.creatorDepositMultiplier)).toFixed(6) }} eCNY/个)</p>
-                  <p class="deposit-item">买家押金: <span class="highlight">{{ item.buyerDepositMultiplier }}倍</span> ({{ (Number(item.price) * Number(item.buyerDepositMultiplier)).toFixed(6) }} eCNY/个)</p>
+                  <p class="deposit-item">卖家押金: <span class="highlight">{{ item.creatorDepositMultiplier }}倍</span> ({{ formatPriceDisplay(Number(item.price) * Number(item.creatorDepositMultiplier)) }} eCNY/个)</p>
+                  <p class="deposit-item">买家押金: <span class="highlight">{{ item.buyerDepositMultiplier }}倍</span> ({{ formatPriceDisplay(Number(item.price) * Number(item.buyerDepositMultiplier)) }} eCNY/个)</p>
                 </div>
                 <button class="buy-now-button" @click="buyForm.itemId = item.id; showBuyForm = true">
                   立即购买
@@ -1368,13 +1409,13 @@ onMounted(loadMarketData);
               <div class="item-info">
                 <h4>{{ item.name }}</h4>
                 <p class="item-description">{{ item.description }}</p>
-                <p class="item-price">价格: {{ item.price }} eCNY</p>
+                <p class="item-price">价格: {{ formatPriceDisplay(item.price) }} eCNY</p>
                 <p class="item-quantity">总数量: {{ item.totalQuantity }}</p>
                 <p class="item-quantity">可用数量: {{ item.availableQuantity }}</p>
                 <!-- 添加押金信息显示 -->
                 <div class="deposit-info">
-                  <p class="deposit-item">卖家押金: <span class="highlight">{{ item.creatorDepositMultiplier }}倍</span> ({{ (Number(item.price) * Number(item.creatorDepositMultiplier)).toFixed(6) }} eCNY/个)</p>
-                  <p class="deposit-item">买家押金: <span class="highlight">{{ item.buyerDepositMultiplier }}倍</span> ({{ (Number(item.price) * Number(item.buyerDepositMultiplier)).toFixed(6) }} eCNY/个)</p>
+                  <p class="deposit-item">卖家押金: <span class="highlight">{{ item.creatorDepositMultiplier }}倍</span> ({{ formatPriceDisplay(Number(item.price) * Number(item.creatorDepositMultiplier)) }} eCNY/个)</p>
+                  <p class="deposit-item">买家押金: <span class="highlight">{{ item.buyerDepositMultiplier }}倍</span> ({{ formatPriceDisplay(Number(item.price) * Number(item.buyerDepositMultiplier)) }} eCNY/个)</p>
                 </div>
                 <div class="item-actions">
                   <button class="action-button add-quantity" @click="quantityForm.itemId = item.id; showQuantityForm = true">
@@ -1429,7 +1470,7 @@ onMounted(loadMarketData);
               </div>
               <div class="transaction-info">
                 <p>商品ID: {{ tx.itemId }}</p>
-                <p>保证金: {{ tx.deposit }} eCNY</p>
+                <p>保证金: {{ formatPriceDisplay(tx.deposit) }} eCNY</p>
                 <p>结束时间: {{ tx.endTime }}</p>
                 <div class="transaction-actions">
                   <button class="action-button view" @click="viewTransactionDetails(tx.id)">
@@ -1593,7 +1634,7 @@ onMounted(loadMarketData);
           
           <div class="deposit-summary">
             <h4>保证金计算:</h4>
-            <p>发布这些商品需支付的总保证金: {{ calculateTotalCreatorDeposit() }} eCNY</p>
+            <p>发布这些商品需支付的总保证金: {{ formatPriceDisplay(calculateTotalCreatorDeposit()) }} eCNY</p>
           </div>
           
           <div class="form-actions">
@@ -1621,7 +1662,7 @@ onMounted(loadMarketData);
                     :checked="batchBuyForm.items.some(i => i.itemId === item.id)"
                     @change="toggleItemInBatchBuy(item.id)">
                   <span class="checkmark"></span>
-                  {{ item.name }} - 价格: {{ item.price }} eCNY - 可用数量: {{ item.availableQuantity }}
+                  {{ item.name }} - 价格: {{ formatPriceDisplay(item.price) }} eCNY - 可用数量: {{ item.availableQuantity }}
                 </label>
                 <div v-if="batchBuyForm.items.some(i => i.itemId === item.id)" class="quantity-selector">
                   <span>数量:</span>
@@ -1679,10 +1720,9 @@ onMounted(loadMarketData);
                     type="checkbox"
                     :value="tx.id"
                     :checked="batchTransactionForm.transactionIds.includes(tx.id)"
-                    @change="toggleTransactionInBatchApprove(tx.id)"
-                  >
+                    @change="toggleTransactionInBatchApprove(tx.id)">
                   <span class="checkmark"></span>
-                  交易 #{{ tx.id }} - 商品ID: {{ tx.itemId }} - 保证金: {{ tx.deposit }} eCNY
+                  交易 #{{ tx.id }} - 商品ID: {{ tx.itemId }} - 保证金: {{ formatPriceDisplay(tx.deposit) }} eCNY
                 </label>
               </div>
             </div>
