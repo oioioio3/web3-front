@@ -10,23 +10,41 @@ import "./ReputationContract.sol";
 contract MarketplaceContract is ReentrancyGuard, Pausable, ReputationContract, NFTSimple {
     address public platformWallet;
     address public erc20Token; // 固定ERC20代币
+    enum Country {
+        CN, // 中国
+        US, // 美国
+        JP, // 日本
+        GB, // 英国
+        DE, // 德国
+        FR, // 法国
+        AU, // 澳大利亚
+        CA // 加拿大
+    }
 
+    enum TaskCategory {
+        service, //服务
+        user,    //用户
+        demand,  //需求
+        company  //公司
+    }
     struct Item {
         address creator; // 商家/需求方
         uint256 price; // 价格/报酬
         uint256 creatorDepositMultiplier; // 发布者质押倍数
-        uint256 buyerDepositMultiplier; // 参与者质押倍数
         uint256 duration; // 交易最长持续时间（秒）
         string ipfsHash; // IPFS元数据
         uint256 totalQuantity; // NFT数量
         uint256 availableQuantity; // 剩余数量
         bool active; // 是否有效
+        Country country; // 国家分类
+        TaskCategory taskCategory; // 任务分类
     }
 
     struct Transaction {
         uint256 itemId; // 商品/任务ID
         address participant; // 买家/服务方
         uint256 nftId; // NFT ID
+        uint256 buyerDepositMultiplier;
         uint256 deposit; // 参与者押金
         uint256 endTime; // 交易截止时间
         uint8 status; // 0-待确认，1-进行中，2-正常，3-协商，4-超时
@@ -37,10 +55,10 @@ contract MarketplaceContract is ReentrancyGuard, Pausable, ReputationContract, N
     uint256 public itemCounter = 1;
     uint256 public transactionCounter = 1;
 
-    event ItemPublished(uint256 indexed itemId, address indexed creator, uint256 price, uint256 quantity);
-    event ItemsBatchPublished(uint256[] itemIds, address indexed creator);
-    event TransactionRequested(uint256 indexed transactionId, uint256 indexed itemId, address indexed participant);
-    event TransactionsBatchRequested(uint256[] transactionIds, uint256[] itemIds, address indexed participant);
+    event ItemPublished(uint256 indexed itemId, address indexed creator, uint256 price, uint256 quantity, uint8 country, uint8 taskCategory);
+    event ItemsBatchPublished(uint256[] itemIds, address indexed creator,uint8[] countries,uint8[] taskCategories);
+    event TransactionRequested(uint256 indexed transactionId, uint256 indexed itemId, address indexed participant, uint256 buyerDepositMultiplier);
+    event TransactionsBatchRequested(uint256[] transactionIds, uint256[] itemIds, address indexed participant, uint256[] buyerDepositMultipliers);
     event TransactionApproved(uint256 indexed transactionId, address indexed participant);
     event TransactionsBatchApproved(uint256[] transactionIds, address indexed creator);
     event TransactionConfirmed(uint256 indexed transactionId, uint8 status);
@@ -48,7 +66,7 @@ contract MarketplaceContract is ReentrancyGuard, Pausable, ReputationContract, N
     event TransactionTimedOut(uint256 indexed transactionId);
     event TransactionBatchTimedOut(uint256[] transactionIds);
     event ItemQuantityAdded(uint256 indexed itemId, address indexed creator, uint256 additionalQuantity);
-
+    event ItemWithdraw(uint256 indexed itemId, uint256 quantity);
     constructor(
         address _erc20Token
     ) NFTSimple(msg.sender) {
@@ -64,10 +82,10 @@ contract MarketplaceContract is ReentrancyGuard, Pausable, ReputationContract, N
         _unpause();
     }
 
-    function addItemQuantity(uint256 itemId, uint256 additionalQuantity) 
-        external 
-        nonReentrant 
-        whenNotPaused 
+    function addItemQuantity(uint256 itemId, uint256 additionalQuantity)
+        external
+        nonReentrant
+        whenNotPaused
     {
         Item storage item = items[itemId];
         require(item.active, "Item not active");
@@ -90,38 +108,39 @@ contract MarketplaceContract is ReentrancyGuard, Pausable, ReputationContract, N
     function _publishItem(
         uint256 price,
         uint256 creatorDepositMultiplier,
-        uint256 buyerDepositMultiplier,
         uint256 duration,
         string memory ipfsHash,
         uint256 quantity,
-        bool isBatch
+        bool isBatch,
+        Country country,
+        TaskCategory taskCategory
     ) internal returns (uint256) {
         require(price > 0 && price <= 1e14, "Price out of range");
         require(quantity > 0, "Quantity must be positive");
         require(duration > 0, "Invalid duration");
         require(creatorDepositMultiplier > 0, "The multiple must be greater than 0");
-        require(buyerDepositMultiplier > 0, "The multiple must be greater than 0");
 
         uint256 itemId = itemCounter;
-        unchecked { 
+        unchecked {
             itemCounter++;
         }
         items[itemId] = Item({
             creator: msg.sender,
             price: price,
             creatorDepositMultiplier: creatorDepositMultiplier,
-            buyerDepositMultiplier: buyerDepositMultiplier,
             duration: duration,
             ipfsHash: ipfsHash,
             totalQuantity: quantity,
             availableQuantity: quantity,
-            active: true
+            active: true,
+            country: country,
+            taskCategory: taskCategory
         });
 
         createNFT(msg.sender, itemId, ipfsHash);
-        
+
         if (!isBatch) {
-            emit ItemPublished(itemId, msg.sender, price, quantity);
+            emit ItemPublished(itemId, msg.sender, price, quantity, uint8(country), uint8(taskCategory));
         }
 
         return itemId;
@@ -130,21 +149,21 @@ contract MarketplaceContract is ReentrancyGuard, Pausable, ReputationContract, N
     function publishItem(
         uint256 price,
         uint256 creatorDepositMultiplier,
-        uint256 buyerDepositMultiplier,
         uint256 duration,
         string memory ipfsHash,
-        uint256 quantity
+        uint256 quantity,
+        Country country,
+        TaskCategory taskCategory
     ) external nonReentrant whenNotPaused returns (uint256) {
-        // 将用户输入的价格（如1 eCNY）转换为合约需要的单位（如1000000）
-        // 注意: 前端已经将价格乘以1000000转换为最小单位,这里直接使用
-        uint256 itemId= _publishItem(
+        uint256 itemId = _publishItem(
             price,
             creatorDepositMultiplier,
-            buyerDepositMultiplier,
             duration,
             ipfsHash,
             quantity,
-            false
+            false,
+            country,
+            taskCategory
         );
         uint256 deposit = price * creatorDepositMultiplier * quantity;
         IERC20(erc20Token).transferFrom(msg.sender, address(this), deposit);
@@ -155,34 +174,40 @@ contract MarketplaceContract is ReentrancyGuard, Pausable, ReputationContract, N
     function batchPublishItems(
         uint256[] memory prices,
         uint256[] memory creatorDepositMultipliers,
-        uint256[] memory buyerDepositMultipliers,
         uint256[] memory durations,
         string[] memory ipfsHashes,
-        uint256[] memory quantities
+        uint256[] memory quantities,
+        Country[] memory countries,
+        TaskCategory[] memory taskCategories
     ) external nonReentrant whenNotPaused returns (uint256[] memory) {
         require(prices.length == quantities.length, "Array length mismatch");
         require(prices.length == creatorDepositMultipliers.length, "Array length mismatch");
-        require(prices.length == buyerDepositMultipliers.length, "Array length mismatch");
         require(prices.length == durations.length, "Array length mismatch");
         require(prices.length == ipfsHashes.length, "Array length mismatch");
+        require(prices.length == countries.length, "Array length mismatch");
+        require(prices.length == taskCategories.length, "Array length mismatch");
 
         uint256[] memory itemIds = new uint256[](prices.length);
         uint256 totalDeposit;
+        uint8[] memory emittedCountries = new uint8[](prices.length);
+        uint8[] memory emittedTaskCategories = new uint8[](prices.length);
         for (uint256 i = 0; i < prices.length; i++) {
-            // 注意: 前端已经将价格乘以1000000转换为最小单位,这里直接使用
             itemIds[i] = _publishItem(
                 prices[i],
                 creatorDepositMultipliers[i],
-                buyerDepositMultipliers[i],
                 durations[i],
                 ipfsHashes[i],
                 quantities[i],
-                true
+                true,
+                countries[i],
+                taskCategories[i]
             );
             totalDeposit += prices[i] * creatorDepositMultipliers[i] * quantities[i];
+            emittedCountries[i] = uint8(countries[i]);
+            emittedTaskCategories[i] = uint8(taskCategories[i]);
         }
         IERC20(erc20Token).transferFrom(msg.sender, address(this), totalDeposit);
-        emit ItemsBatchPublished(itemIds, msg.sender);
+        emit ItemsBatchPublished(itemIds, msg.sender, emittedCountries, emittedTaskCategories);
         return itemIds;
     }
 
@@ -199,60 +224,70 @@ contract MarketplaceContract is ReentrancyGuard, Pausable, ReputationContract, N
             item.active = false;
             _burn(itemId);
         }
-
+        emit ItemWithdraw(itemId, quantity);
         IERC20(erc20Token).transfer(msg.sender, refund);
     }
 
-    function _requestTransaction(uint256 itemId, bool isBatch) internal returns (uint256) {
+    function _requestTransaction(
+        uint256 itemId,
+        bool isBatch,
+        uint256 buyerDepositMultiplier
+    ) internal returns (uint256) {
         Item storage item = items[itemId];
         require(item.active && item.availableQuantity > 0, "Item not available");
         require(item.creator != msg.sender, "Cannot be picked up by oneself");
+        require(buyerDepositMultiplier > 0, "The multiple must be greater than 0");
 
-        uint256 deposit = item.price * item.buyerDepositMultiplier;
+        uint256 deposit = item.price * buyerDepositMultiplier;
 
         uint256 transactionId = transactionCounter;
-        unchecked { 
+        unchecked {
             transactionCounter++;
         }
         transactions[transactionId] = Transaction({
             itemId: itemId,
             participant: msg.sender,
             nftId: 0,
+            buyerDepositMultiplier: buyerDepositMultiplier,
             deposit: deposit,
             endTime: 0,
             status: 0
         });
 
         if (!isBatch) {
-            emit TransactionRequested(transactionId, itemId, msg.sender);
+            emit TransactionRequested(transactionId, itemId, msg.sender, buyerDepositMultiplier);
         }
 
         return transactionId;
     }
 
-    function requestTransaction(uint256 itemId) external nonReentrant whenNotPaused returns (uint256) {
-        uint256 transactionId = _requestTransaction(itemId, false);
+    function requestTransaction(
+        uint256 itemId,
+        uint256 buyerDepositMultiplier
+    ) external nonReentrant whenNotPaused returns (uint256) {
+        uint256 transactionId = _requestTransaction(itemId, false, buyerDepositMultiplier);
         Transaction storage txn = transactions[transactionId];
         IERC20(erc20Token).transferFrom(msg.sender, address(this), txn.deposit);
         return transactionId;
     }
 
-    function batchRequestTransactions(uint256[] memory itemIds)
-        external
-        nonReentrant
-        whenNotPaused
-        returns (uint256[] memory)
-    {
+    function batchRequestTransactions(
+        uint256[] memory itemIds,
+        uint256[] memory buyerDepositMultipliers
+    ) external nonReentrant whenNotPaused returns (uint256[] memory) {
+        require(itemIds.length == buyerDepositMultipliers.length, "Array length mismatch");
+
         uint256[] memory transactionIds = new uint256[](itemIds.length);
         uint256 totalDeposit;
         for (uint256 i = 0; i < itemIds.length; i++) {
-            transactionIds[i] = _requestTransaction(itemIds[i], true);
+            transactionIds[i] = _requestTransaction(itemIds[i], true, buyerDepositMultipliers[i]);
             totalDeposit += transactions[transactionIds[i]].deposit;
         }
         IERC20(erc20Token).transferFrom(msg.sender, address(this), totalDeposit);
-        emit TransactionsBatchRequested(transactionIds, itemIds, msg.sender);
+        emit TransactionsBatchRequested(transactionIds, itemIds, msg.sender,buyerDepositMultipliers);
         return transactionIds;
     }
+
 
     function batchCancelTransactions(uint256[] memory transactionIds) external nonReentrant whenNotPaused {
         uint256 totalRefund;
@@ -332,7 +367,7 @@ contract MarketplaceContract is ReentrancyGuard, Pausable, ReputationContract, N
         require(txn.status == 1, "Transaction not active");
         require(block.timestamp > txn.endTime, "Not timed out");
         Item storage item = items[txn.itemId];
-        
+
         item.totalQuantity--;
 
         updateReputation(item.creator, 4);
@@ -342,7 +377,7 @@ contract MarketplaceContract is ReentrancyGuard, Pausable, ReputationContract, N
         if (!isBatch) {
             emit TransactionTimedOut(transactionId);
         }
-        
+
     }
 
     function handleTimeout(uint256 transactionId) external onlyOwner nonReentrant whenNotPaused {
@@ -369,24 +404,26 @@ contract MarketplaceContract is ReentrancyGuard, Pausable, ReputationContract, N
         address creator,
         uint256 price,
         uint256 creatorDepositMultiplier,
-        uint256 buyerDepositMultiplier,
         uint256 duration,
         string memory ipfsHash,
         uint256 totalQuantity,
         uint256 availableQuantity,
-        bool active
+        bool active,
+        Country country,
+        TaskCategory taskCategory
     ) {
         Item storage item = items[itemId];
         return (
             item.creator,
             item.price,
             item.creatorDepositMultiplier,
-            item.buyerDepositMultiplier,
             item.duration,
             item.ipfsHash,
             item.totalQuantity,
             item.availableQuantity,
-            item.active
+            item.active,
+            item.country,
+            item.taskCategory
         );
     }
 
@@ -394,6 +431,7 @@ contract MarketplaceContract is ReentrancyGuard, Pausable, ReputationContract, N
         uint256 itemId,
         address participant,
         uint256 nftId,
+        uint256 buyerDepositMultiplier,
         uint256 deposit,
         uint256 endTime,
         uint8 status
@@ -403,6 +441,7 @@ contract MarketplaceContract is ReentrancyGuard, Pausable, ReputationContract, N
             txn.itemId,
             txn.participant,
             txn.nftId,
+            txn.buyerDepositMultiplier,
             txn.deposit,
             txn.endTime,
             txn.status

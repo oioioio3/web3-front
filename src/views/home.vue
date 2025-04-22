@@ -65,10 +65,11 @@ const publishForm = ref({
   description: '',
   price: '',
   creatorDepositMultiplier: 1,
-  buyerDepositMultiplier: 1,
   duration: 86400, // 默认1天（秒）
   quantity: 1,
-  imageFile: null
+  imageFile: null,
+  country: 0, // 默认中国
+  taskCategory: 0 // 默认服务
 });
 
 // 增加数量表单
@@ -80,7 +81,7 @@ const quantityForm = ref({
 // 购买表单
 const buyForm = ref({
   itemId: '',
-  quantity: 1
+  buyerDepositMultiplier: 1 // 添加买家保证金倍数
 });
 
 // 撤回商品表单
@@ -127,10 +128,11 @@ const batchPublishForm = ref({
       description: '',
       price: '',
       creatorDepositMultiplier: 1,
-      buyerDepositMultiplier: 1,
       duration: 86400, // 默认1天（秒）
       quantity: 1,
-      imageFile: null
+      imageFile: null,
+      country: 0, // 默认中国
+      taskCategory: 0 // 默认服务
     }
   ]
 });
@@ -292,7 +294,7 @@ const handlePublish = async () => {
     // 表单验证
     if (!publishForm.value.name || !publishForm.value.description || !publishForm.value.price || 
         !publishForm.value.quantity || publishForm.value.creatorDepositMultiplier < 1 || 
-        publishForm.value.buyerDepositMultiplier < 1 || publishForm.value.duration < 60) {
+        publishForm.value.duration < 60) {
       errorMsg.value = '请填写完整信息，保证金倍数必须大于等于1，持续时间必须大于60秒';
       return;
     }
@@ -344,10 +346,11 @@ const handlePublish = async () => {
       const result = await publishItem(
         publishForm.value.price,
         publishForm.value.creatorDepositMultiplier,
-        publishForm.value.buyerDepositMultiplier,
         publishForm.value.duration,
         ipfsHash,
-        publishForm.value.quantity
+        publishForm.value.quantity,
+        publishForm.value.country,
+        publishForm.value.taskCategory
       );
       
       console.log("合约调用结果:", result);
@@ -360,10 +363,11 @@ const handlePublish = async () => {
           description: '',
           price: '',
           creatorDepositMultiplier: 1,
-          buyerDepositMultiplier: 1,
           duration: 86400,
           quantity: 1,
-          imageFile: null
+          imageFile: null,
+          country: 0, // 默认中国
+          taskCategory: 0 // 默认服务
         };
         showPublishForm.value = false;
         
@@ -430,8 +434,8 @@ const handleBuy = async () => {
       return;
     }
     
-    if (buyForm.value.quantity <= 0) {
-      errorMsg.value = '购买数量必须大于0';
+    if (buyForm.value.buyerDepositMultiplier <= 0) {
+      errorMsg.value = '买家保证金倍数必须大于0';
       return;
     }
     
@@ -440,14 +444,17 @@ const handleBuy = async () => {
     
     // 如果数量为1，直接使用单个交易
     if (buyForm.value.quantity === 1) {
-      const result = await requestTransaction(buyForm.value.itemId);
+      const result = await requestTransaction(
+        buyForm.value.itemId,
+        buyForm.value.buyerDepositMultiplier
+      );
       
       if (result.success) {
         successMsg.value = result.message;
         // 重置表单
         buyForm.value = {
           itemId: '',
-          quantity: 1
+          buyerDepositMultiplier: 1
         };
         showBuyForm.value = false;
         
@@ -459,14 +466,15 @@ const handleBuy = async () => {
     } else {
       // 如果数量大于1，使用批量交易
       const itemIds = Array(buyForm.value.quantity).fill(buyForm.value.itemId);
-      const result = await batchRequestTransactions(itemIds);
+      const buyerDepositMultipliers = Array(buyForm.value.quantity).fill(buyForm.value.buyerDepositMultiplier);
+      const result = await batchRequestTransactions(itemIds, buyerDepositMultipliers);
       
       if (result.success) {
         successMsg.value = result.message;
         // 重置表单
         buyForm.value = {
           itemId: '',
-          quantity: 1
+          buyerDepositMultiplier: 1
         };
         showBuyForm.value = false;
         
@@ -650,13 +658,12 @@ const calculateCreatorDeposit = () => {
 
 // 计算买家需要支付的保证金
 const calculateBuyerDeposit = () => {
-  if (!publishForm.value.price || !publishForm.value.buyerDepositMultiplier) {
+  if (!publishForm.value.price) {
     return '0';
   }
   const price = parseFloat(publishForm.value.price);
-  const multiplier = parseInt(publishForm.value.buyerDepositMultiplier);
-  
-  return (price * multiplier).toFixed(6);
+  // 买家保证金将由买家在购买时设置，这里只显示基本价格
+  return price.toFixed(6);
 };
 
 // 查看物品详情
@@ -778,10 +785,11 @@ const addItemToForm = () => {
     description: '',
     price: '',
     creatorDepositMultiplier: 1,
-    buyerDepositMultiplier: 1,
     duration: 86400,
     quantity: 1,
-    imageFile: null
+    imageFile: null,
+    country: 0,
+    taskCategory: 0
   });
 };
 
@@ -821,7 +829,7 @@ const handleBatchPublish = async () => {
     for (const [index, item] of batchPublishForm.value.items.entries()) {
       if (!item.name || !item.description || !item.price || 
           !item.quantity || item.creatorDepositMultiplier < 1 || 
-          item.buyerDepositMultiplier < 1 || item.duration < 60) {
+          item.duration < 60) {
         errorMsg.value = `第${index + 1}个商品信息不完整，请检查`;
         return;
       }
@@ -874,17 +882,19 @@ const handleBatchPublish = async () => {
     try {
       const prices = batchPublishForm.value.items.map(item => item.price);
       const creatorDepositMultipliers = batchPublishForm.value.items.map(item => item.creatorDepositMultiplier);
-      const buyerDepositMultipliers = batchPublishForm.value.items.map(item => item.buyerDepositMultiplier);
       const durations = batchPublishForm.value.items.map(item => item.duration);
       const quantities = batchPublishForm.value.items.map(item => item.quantity);
+      const countries = batchPublishForm.value.items.map(item => item.country || 0);
+      const taskCategories = batchPublishForm.value.items.map(item => item.taskCategory || 0);
       
       const result = await batchPublishItems(
         prices,
         creatorDepositMultipliers,
-        buyerDepositMultipliers,
         durations,
         ipfsHashes,
-        quantities
+        quantities,
+        countries,
+        taskCategories
       );
       
       console.log("批量发布合约调用结果:", result);
@@ -899,10 +909,11 @@ const handleBatchPublish = async () => {
               description: '',
               price: '',
               creatorDepositMultiplier: 1,
-              buyerDepositMultiplier: 1,
               duration: 86400,
               quantity: 1,
-              imageFile: null
+              imageFile: null,
+              country: 0,
+              taskCategory: 0
             }
           ]
         };
@@ -1072,6 +1083,26 @@ const toggleTransactionInBatchApprove = (txId) => {
 
 // 初始化加载数据
 onMounted(loadMarketData);
+
+// 国家选项
+const countryOptions = [
+  { value: 0, label: '中国' },
+  { value: 1, label: '美国' },
+  { value: 2, label: '日本' },
+  { value: 3, label: '英国' },
+  { value: 4, label: '德国' },
+  { value: 5, label: '法国' },
+  { value: 6, label: '澳大利亚' },
+  { value: 7, label: '加拿大' }
+];
+
+// 任务分类选项
+const taskCategoryOptions = [
+  { value: 0, label: '服务' },
+  { value: 1, label: '用户' },
+  { value: 2, label: '需求' },
+  { value: 3, label: '公司' }
+];
 </script>
 
 <template>
@@ -1193,14 +1224,6 @@ onMounted(loadMarketData);
               </div>
             </div>
             <div class="form-group">
-              <label>买家保证金倍数:</label>
-              <input type="number" v-model="publishForm.buyerDepositMultiplier" placeholder="输入买家保证金倍数" min="1">
-              <div class="field-info">
-                买家需要缴纳的保证金 = 价格 × 保证金倍数。
-                <br>保证金将在交易完成后部分返还，为了防止恶意行为，倍数至少为1。
-              </div>
-            </div>
-            <div class="form-group">
               <label>交易持续时间(秒):</label>
               <input type="number" v-model="publishForm.duration" placeholder="输入交易持续时间" min="60">
               <div class="field-info">
@@ -1221,7 +1244,8 @@ onMounted(loadMarketData);
             <div class="deposit-summary">
               <h4>保证金计算:</h4>
               <p>发布此商品需支付的保证金: {{ formatPriceDisplay(calculateCreatorDeposit()) }} eCNY</p>
-              <p>买家购买此商品需支付的保证金: {{ formatPriceDisplay(calculateBuyerDeposit()) }} eCNY</p>
+              <p>买家购买此商品需支付的基础价格: {{ formatPriceDisplay(calculateBuyerDeposit()) }} eCNY</p>
+              <p>（买家实际支付的保证金将根据买家选择的保证金倍数而定）</p>
             </div>
             <div class="form-actions">
               <button class="cancel-button" @click="showPublishForm = false">取消</button>
@@ -1298,23 +1322,22 @@ onMounted(loadMarketData);
               </select>
             </div>
             <div class="form-group" v-if="buyForm.itemId">
-              <label>购买数量:</label>
+              <label>买家保证金倍数:</label>
               <input 
                 type="number" 
-                v-model="buyForm.quantity" 
+                v-model="buyForm.buyerDepositMultiplier" 
                 min="1" 
-                :max="marketData.allItems.find(item => item.id === buyForm.itemId)?.availableQuantity || 1">
+                step="1">
               <div class="field-info">
-                您想购买的商品数量，可用数量: {{ marketData.allItems.find(item => item.id === buyForm.itemId)?.availableQuantity || 0 }}
+                设置您愿意支付的保证金倍数（必须大于等于1）
               </div>
             </div>
             <div class="deposit-summary" v-if="buyForm.itemId">
               <h4>交易摘要:</h4>
               <p>商品名称: {{ marketData.allItems.find(item => item.id === buyForm.itemId)?.name }}</p>
               <p>单价: {{ formatEcnyBalance(marketData.allItems.find(item => item.id === buyForm.itemId)?.price) }} eCNY</p>
-              <p>数量: {{ buyForm.quantity }}</p>
-              <p>总金额: {{ (Number(marketData.allItems.find(item => item.id === buyForm.itemId)?.price) * buyForm.quantity).toFixed(6) }} eCNY</p>
-              <p>需支付保证金: {{ (Number(marketData.allItems.find(item => item.id === buyForm.itemId)?.price) * Number(marketData.allItems.find(item => item.id === buyForm.itemId)?.buyerDepositMultiplier) * buyForm.quantity).toFixed(6) }} eCNY</p>
+              <p>买家保证金倍数: {{ buyForm.buyerDepositMultiplier }}</p>
+              <p>需支付保证金: {{ (Number(marketData.allItems.find(item => item.id === buyForm.itemId)?.price) * buyForm.buyerDepositMultiplier).toFixed(6) }} eCNY</p>
             </div>
             <div class="form-actions">
               <button class="cancel-button" @click="showBuyForm = false">取消</button>
@@ -1385,10 +1408,11 @@ onMounted(loadMarketData);
                 <p class="item-price">价格: {{ formatPriceDisplay(item.price) }} eCNY</p>
                 <p class="item-quantity">可用数量: {{ item.availableQuantity }}</p>
                 <p class="item-seller">卖家: {{ item.creator ? shortenAddress(item.creator) : '' }}</p>
-                <!-- 添加质押信息显示 -->
+                <p class="item-country">国家: {{ item.countryText }}</p>
+                <p class="item-category">分类: {{ item.taskCategoryText }}</p>
+                <!-- 质押信息显示 -->
                 <div class="deposit-info">
                   <p class="deposit-item">卖家押金: <span class="highlight">{{ item.creatorDepositMultiplier }}倍</span> ({{ formatPriceDisplay(Number(item.price) * Number(item.creatorDepositMultiplier)) }} eCNY/个)</p>
-                  <p class="deposit-item">买家押金: <span class="highlight">{{ item.buyerDepositMultiplier }}倍</span> ({{ formatPriceDisplay(Number(item.price) * Number(item.buyerDepositMultiplier)) }} eCNY/个)</p>
                 </div>
                 <button class="buy-now-button" @click="buyForm.itemId = item.id; showBuyForm = true">
                   立即购买
@@ -1412,10 +1436,11 @@ onMounted(loadMarketData);
                 <p class="item-price">价格: {{ formatPriceDisplay(item.price) }} eCNY</p>
                 <p class="item-quantity">总数量: {{ item.totalQuantity }}</p>
                 <p class="item-quantity">可用数量: {{ item.availableQuantity }}</p>
-                <!-- 添加押金信息显示 -->
+                <p class="item-country">国家: {{ item.countryText }}</p>
+                <p class="item-category">分类: {{ item.taskCategoryText }}</p>
+                <!-- 押金信息显示 -->
                 <div class="deposit-info">
                   <p class="deposit-item">卖家押金: <span class="highlight">{{ item.creatorDepositMultiplier }}倍</span> ({{ formatPriceDisplay(Number(item.price) * Number(item.creatorDepositMultiplier)) }} eCNY/个)</p>
-                  <p class="deposit-item">买家押金: <span class="highlight">{{ item.buyerDepositMultiplier }}倍</span> ({{ formatPriceDisplay(Number(item.price) * Number(item.buyerDepositMultiplier)) }} eCNY/个)</p>
                 </div>
                 <div class="item-actions">
                   <button class="action-button add-quantity" @click="quantityForm.itemId = item.id; showQuantityForm = true">
@@ -1611,16 +1636,33 @@ onMounted(loadMarketData);
               <input type="number" v-model="item.creatorDepositMultiplier" placeholder="创建者保证金倍数" min="1">
             </div>
             <div class="form-group">
-              <label>买家保证金倍数:</label>
-              <input type="number" v-model="item.buyerDepositMultiplier" placeholder="买家保证金倍数" min="1">
-            </div>
-            <div class="form-group">
               <label>交易持续时间(秒):</label>
               <input type="number" v-model="item.duration" placeholder="交易持续时间" min="60">
             </div>
             <div class="form-group">
               <label>数量:</label>
               <input type="number" v-model="item.quantity" placeholder="输入数量" min="1">
+            </div>
+            <div class="form-group">
+              <label>国家:</label>
+              <select v-model="item.country">
+                <option value="0">中国</option>
+                <option value="1">美国</option>
+                <option value="2">英国</option>
+                <option value="3">日本</option>
+                <option value="4">韩国</option>
+                <option value="5">其他</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>任务分类:</label>
+              <select v-model="item.taskCategory">
+                <option value="0">服务</option>
+                <option value="1">实物</option>
+                <option value="2">数字产品</option>
+                <option value="3">任务</option>
+                <option value="4">其他</option>
+              </select>
             </div>
             <div class="form-group">
               <label>图片文件:</label>

@@ -33,9 +33,10 @@ export default defineConfig({
     },
     server: {
         host: true,
+        port: 5000,
         proxy: {
             "/api": {
-                target: "http://localhost:8800",
+                target: "http://localhost:8084",
                 changeOrigin: true, //支持跨域
                 rewrite: (path) => path.replace(/^\/api/, ""), //重写路径,替换/api
             },

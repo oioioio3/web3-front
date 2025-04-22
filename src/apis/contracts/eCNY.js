@@ -4,7 +4,7 @@ import web3 from './web3';
 import eCNYContracts from "./abi/eCNY.json";
 
 export const eCNY = ref(null);
-export const eCNYContractsAddr = ref("0x3aB04c612Fa3d97B47cAf0E64efB1dC32F0Db4E9")
+export const eCNYContractsAddr = ref("0x6C419d9fC4C2Fa9C62235b602B2cA328035883F7")
 // 创建智能合约实例
 eCNY.value = new web3.eth.Contract(
     eCNYContracts.abi,

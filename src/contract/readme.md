@@ -1,6 +1,6 @@
 # 市场合约功能分析
 
-本文档为 `MarketplaceContract.sol`、`NFTSimple.sol` 和 `ReputationContract.sol` 智能合约提供功能概述，适用于去中心化市场。合约支持创建者发布商品（以 NFT 形式表示）、参与者请求交易，并管理交易生命周期和用户信誉。市场使用固定 ERC20 代币（6 位小数）进行支付和质押，禁止接收以太币（ETH）。
+本文档为 `MarketplaceContract.sol`、`NFTSimple.sol` 和 `ReputationContract.sol` 智能合约提供功能概述，适用于去中心化市场。合约支持创建者发布商品（以 NFT 表示）、参与者请求交易，并管理交易生命周期和用户信誉。市场使用固定 ERC20 代币（6 位小数）进行支付和质押，禁止接收以太币（ETH）。
 
 ## 目录
 1. [概述](#概述)
@@ -15,8 +15,8 @@
 
 ## 概述
 `MarketplaceContract` 是核心合约，继承了 `NFTSimple`（用于 NFT 管理）、`ReputationContract`（用于用户信誉）、`ReentrancyGuard`（用于安全）和 `Pausable`（用于紧急控制）。主要功能包括：
-- **商品发布**：创建者发布商品（以 NFT 表示），指定价格、质押要求和元数据。
-- **交易管理**：参与者请求交易，创建者批准交易，参与者确认完成或协商结果。
+- **商品发布**：创建者发布商品（以 NFT 表示），指定价格、创建者质押要求、国家分类、任务分类和元数据。
+- **交易管理**：参与者请求交易并指定质押倍数，创建者批准交易，参与者确认完成或协商结果。
 - **超时处理**：平台所有者可处理超时的交易，将质押转移至平台钱包。
 - **信誉跟踪**：记录创建者和参与者的成功、协商和超时交易。
 - **NFT 管理**：商品以不可转移的 NFT 表示，由创建者铸造，撤回时销毁。
@@ -29,29 +29,31 @@
 ### Item（MarketplaceContract）
 表示创建者发布的商品（产品或服务），存储在 `items` 映射中。
 
-| 参数                      | 类型      | 描述                                                                 |
-|---------------------------|-----------|----------------------------------------------------------------------|
-| `creator`                 | `address` | 商品发布者的地址（卖家或服务提供者）。                               |
-| `price`                   | `uint256` | 商品单价，单位为 ERC20 代币最小单位（6 位小数，例如 `1e6` = 1 代币）。 |
-| `creatorDepositMultiplier`| `uint256` | 创建者质押倍数（例如，`2` 表示质押 = `price * 2`）。                 |
-| `buyerDepositMultiplier`  | `uint256` | 参与者质押倍数（例如，`1` 表示质押 = `price * 1`）。                 |
-| `duration`                | `uint256` | 交易最长持续时间，单位为秒（例如，`86400` 表示 1 天）。              |
-| `ipfsHash`                | `string`  | 商品元数据的 IPFS 哈希（例如，描述、图片）。                         |
-| `totalQuantity`           | `uint256` | 商品总单位数（NFT 数量）。                                           |
-| `availableQuantity`       | `uint256` | 可用于交易的剩余单位数。                                             |
-| `active`                  | `bool`    | 商品是否有效（`true` 表示有效，`false` 表示已撤回或无效）。          |
+| 参数                      | 类型            | 描述                                                                 |
+|---------------------------|-----------------|----------------------------------------------------------------------|
+| `creator`                 | `address`       | 商品发布者的地址（卖家或服务提供者）。                               |
+| `price`                   | `uint256`       | 商品单价，单位为 ERC20 代币最小单位（6 位小数，例如 `1e6` = 1 代币）。 |
+| `creatorDepositMultiplier`| `uint256`       | 创建者质押倍数（例如，`2` 表示质押 = `price * 2`）。                 |
+| `duration`                | `uint256`       | 交易最长持续时间，单位为秒（例如，`86400` 表示 1 天）。              |
+| `ipfsHash`                | `string`        | 商品元数据的 IPFS 哈希（例如，描述、图片）。                         |
+| `totalQuantity`           | `uint256`       | 商品总单位数（NFT 数量）。                                           |
+| `availableQuantity`       | `uint256`       | 可用于交易的剩余单位数。                                             |
+| `active`                  | `bool`          | 商品是否有效（`true` 表示有效，`false` 表示已撤回或无效）。          |
+| `country`                 | `Country`       | 国家分类（枚举值：`CN`、`US`、`JP`、`GB`、`DE`、`FR`、`AU`、`CA`）。 |
+| `taskCategory`            | `TaskCategory`  | 任务分类（枚举值：`service`、`user`、`demand`、`company`）。          |
 
 ### Transaction（MarketplaceContract）
 表示商品的交易，存储在 `transactions` 映射中。
 
-| 参数           | 类型      | 描述                                                                 |
-|----------------|-----------|----------------------------------------------------------------------|
-| `itemId`       | `uint256` | 交易关联的商品 ID。                                                  |
-| `participant`  | `address` | 参与者（买家或服务接收者）的地址。                                   |
-| `nftId`        | `uint256` | 交易关联的 NFT ID（批准后设置）。                                    |
-| `deposit`      | `uint256` | 参与者质押的代币数量（例如，`price * buyerDepositMultiplier`）。      |
-| `endTime`      | `uint256` | 交易截止时间戳（批准后设置）。                                       |
-| `status`       | `uint8`   | 交易状态：`0`（待确认），`1`（进行中），`2`（成功），`3`（协商），`4`（超时/取消）。 |
+| 参数                      | 类型      | 描述                                                                 |
+|---------------------------|-----------|----------------------------------------------------------------------|
+| `itemId`                  | `uint256` | 交易关联的商品 ID。                                                  |
+| `participant`             | `address` | 参与者（买家或服务接收者）的地址。                                   |
+| `nftId`                   | `uint256` | 交易关联的 NFT ID（批准后设置）。                                    |
+| `buyerDepositMultiplier`  | `uint256` | 参与者质押倍数（例如，`1` 表示质押 = `price * 1`）。                 |
+| `deposit`                 | `uint256` | 参与者质押的代币数量（`price * buyerDepositMultiplier`）。            |
+| `endTime`                 | `uint256` | 交易截止时间戳（批准后设置）。                                       |
+| `status`                  | `uint8`   | 交易状态：`0`（待确认），`1`（进行中），`2`（成功），`3`（协商），`4`（超时/取消）。 |
 
 ### Reputation（ReputationContract）
 跟踪用户的交易信誉，存储在 `reputations` 映射中。
@@ -108,38 +110,40 @@ function addItemQuantity(uint256 itemId, uint256 additionalQuantity) external no
 
 #### publishItem
 ```solidity
-function publishItem(uint256 price, uint256 creatorDepositMultiplier, uint256 buyerDepositMultiplier, uint256 duration, string memory ipfsHash, uint256 quantity) external nonReentrant whenNotPaused returns (uint256)
+function publishItem(uint256 price, uint256 creatorDepositMultiplier, uint256 duration, string memory ipfsHash, uint256 quantity, Country country, TaskCategory taskCategory) external nonReentrant whenNotPaused returns (uint256)
 ```
 - **用途**：发布单个商品（以 NFT 表示），可用于交易。
 - **参数**：
   - `price`：商品单价，单位为代币最小单位（6 位小数，最大 `1e14`）。
   - `creatorDepositMultiplier`：创建者质押倍数。
-  - `buyerDepositMultiplier`：参与者质押倍数。
   - `duration`：交易最长持续时间（秒）。
   - `ipfsHash`：商品元数据的 IPFS 哈希。
   - `quantity`：发布的商品单位数量。
+  - `country`：国家分类（`Country` 枚举值）。
+  - `taskCategory`：任务分类（`TaskCategory` 枚举值）。
 - **效果**：
   - 从调用者转入 `price * creatorDepositMultiplier * quantity` 代币作为质押。
   - 创建商品并铸造 NFT。
-  - 触发 `ItemPublished` 事件。
+  - 触发 `ItemPublished` 事件，包含 `country` 和 `taskCategory` 作为 `uint8` 值。
 - **返回**：创建的商品 ID。
 
 #### batchPublishItems
 ```solidity
-function batchPublishItems(uint256[] memory prices, uint256[] memory creatorDepositMultipliers, uint256[] memory buyerDepositMultipliers, uint256[] memory durations, string[] memory ipfsHashes, uint256[] memory quantities) external nonReentrant whenNotPaused returns (uint256[] memory)
+function batchPublishItems(uint256[] memory prices, uint256[] memory creatorDepositMultipliers, uint256[] memory durations, string[] memory ipfsHashes, uint256[] memory quantities, Country[] memory countries, TaskCategory[] memory taskCategories) external nonReentrant whenNotPaused returns (uint256[] memory)
 ```
 - **用途**：一次性发布多个商品。
 - **参数**：
   - `prices`：商品单价数组（6 位小数，最大 `1e14`）。
   - `creatorDepositMultipliers`：创建者质押倍数数组。
-  - `buyerDepositMultipliers`：参与者质押倍数数组。
   - `durations`：交易持续时间数组（秒）。
   - `ipfsHashes`：商品元数据 IPFS 哈希数组。
   - `quantities`：商品单位数量数组。
+  - `countries`：国家分类数组（`Country` 枚举值）。
+  - `taskCategories`：任务分类数组（`TaskCategory` 枚举值）。
 - **效果**：
   - 从调用者转入所有商品的质押总和（`prices[i] * creatorDepositMultipliers[i] * quantities[i]`）。
   - 创建多个商品并铸造对应 NFT。
-  - 触发 `ItemsBatchPublished` 事件。
+  - 触发 `ItemsBatchPublished` 事件，包含 `countries` 和 `taskCategories` 作为 `uint8` 数组。
 - **返回**：创建的商品 ID 数组。
 
 #### withdrawItem
@@ -159,28 +163,30 @@ function withdrawItem(uint256 itemId, uint256 quantity) external nonReentrant wh
 
 #### requestTransaction
 ```solidity
-function requestTransaction(uint256 itemId) external nonReentrant whenNotPaused returns (uint256)
+function requestTransaction(uint256 itemId, uint256 buyerDepositMultiplier) external nonReentrant whenNotPaused returns (uint256)
 ```
-- **用途**：允许参与者为商品请求交易。
+- **用途**：允许参与者为商品请求交易，并指定质押倍数。
 - **参数**：
   - `itemId`：请求的商品 ID。
+  - `buyerDepositMultiplier`：参与者质押倍数（例如，`1` 表示质押 = `price * 1`）。
 - **效果**：
   - 要求商品有效、有可用数量，且调用者不是创建者。
   - 从调用者转入 `price * buyerDepositMultiplier` 代币作为质押。
-  - 创建待确认交易（状态 `0`）。
+  - 创建待确认交易（状态 `0`），记录质押倍数。
   - 触发 `TransactionRequested` 事件。
 - **返回**：创建的交易 ID。
 
 #### batchRequestTransactions
 ```solidity
-function batchRequestTransactions(uint256[] memory itemIds) external nonReentrant whenNotPaused returns (uint256[] memory)
+function batchRequestTransactions(uint256[] memory itemIds, uint256[] memory buyerDepositMultipliers) external nonReentrant whenNotPaused returns (uint256[] memory)
 ```
-- **用途**：允许参与者为多个商品请求交易。
+- **用途**：允许参与者为多个商品请求交易，并为每个交易指定质押倍数。
 - **参数**：
   - `itemIds`：请求的商品 ID 数组。
+  - `buyerDepositMultipliers`：参与者质押倍数数组。
 - **效果**：
-  - 从调用者转入每个商品的质押总和（`price * buyerDepositMultiplier`）。
-  - 为每个商品创建待确认交易（状态 `0`）。
+  - 从调用者转入每个商品的质押总和（`price * buyerDepositMultipliers[i]`）。
+  - 为每个商品创建待确认交易（状态 `0`），记录质押倍数。
   - 触发 `TransactionsBatchRequested` 事件。
 - **返回**：创建的交易 ID 数组。
 
@@ -269,7 +275,7 @@ function batchHandleTimeout(uint256[] memory transactionIds) external onlyOwner 
 
 #### getItemDetails
 ```solidity
-function getItemDetails(uint256 itemId) external view returns (address creator, uint256 price, uint256 creatorDepositMultiplier, uint256 buyerDepositMultiplier, uint256 duration, string memory ipfsHash, uint256 totalQuantity, uint256 availableQuantity, bool active)
+function getItemDetails(uint256 itemId) external view returns (address creator, uint256 price, uint256 creatorDepositMultiplier, uint256 duration, string memory ipfsHash, uint256 totalQuantity, uint256 availableQuantity, bool active, Country country, TaskCategory taskCategory)
 ```
 - **用途**：查询商品的详细信息。
 - **参数**：
@@ -278,16 +284,17 @@ function getItemDetails(uint256 itemId) external view returns (address creator, 
   - `creator`：商品创建者地址。
   - `price`：商品单价。
   - `creatorDepositMultiplier`：创建者质押倍数。
-  - `buyerDepositMultiplier`：参与者质押倍数。
   - `duration`：交易持续时间。
   - `ipfsHash`：IPFS 元数据哈希。
   - `totalQuantity`：总单位数量。
   - `availableQuantity`：可用单位数量。
   - `active`：商品是否有效。
+  - `country`：国家分类。
+  - `taskCategory`：任务分类。
 
 #### getTransactionDetails
 ```solidity
-function getTransactionDetails(uint256 transactionId) external view returns (uint256 itemId, address participant, uint256 nftId, uint256 deposit, uint256 endTime, uint8 status)
+function getTransactionDetails(uint256 transactionId) external view returns (uint256 itemId, address participant, uint256 nftId, uint256 buyerDepositMultiplier, uint256 deposit, uint256 endTime, uint8 status)
 ```
 - **用途**：查询交易的详细信息。
 - **参数**：
@@ -296,6 +303,7 @@ function getTransactionDetails(uint256 transactionId) external view returns (uin
   - `itemId`：关联的商品 ID。
   - `participant`：参与者地址。
   - `nftId`：关联的 NFT ID。
+  - `buyerDepositMultiplier`：参与者质押倍数。
   - `deposit`：参与者质押金额。
   - `endTime`：交易截止时间。
   - `status`：交易状态。
