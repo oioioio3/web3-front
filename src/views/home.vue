@@ -1143,12 +1143,12 @@ const taskCategoryOptions = [
             </div>
             <div class="balance-item">
               <span class="balance-label">eCNY余额:</span>
-              <span class="balance-value">{{ formatEcnyBalance(userBalances.tokenBalance) }} eCNY</span>
+              <span class="balance-value">{{ formatPriceDisplay(userBalances.tokenBalance) }} eCNY</span>
               <button class="mini-button" @click="showTokenInfo = true">获取eCNY</button>
             </div>
             <!-- <div class="balance-item">
               <span class="balance-label">市场代币余额:</span>
-              <span class="balance-value">{{ formatEcnyBalance(userBalances.marketTokenBalance) }} eCNY</span>
+              <span class="balance-value">{{ formatPriceDisplay(userBalances.marketTokenBalance) }} eCNY</span>
             </div> -->
           </div>
           
@@ -1237,6 +1237,24 @@ const taskCategoryOptions = [
               <div class="field-info">要发布的商品数量，每个都会产生一笔独立的交易</div>
             </div>
             <div class="form-group">
+              <label>国家:</label>
+              <select v-model="publishForm.country">
+                <option v-for="option in countryOptions" :key="option.value" :value="option.value">
+                  {{ option.label }}
+                </option>
+              </select>
+              <div class="field-info">选择商品所属的国家分类</div>
+            </div>
+            <div class="form-group">
+              <label>任务分类:</label>
+              <select v-model="publishForm.taskCategory">
+                <option v-for="option in taskCategoryOptions" :key="option.value" :value="option.value">
+                  {{ option.label }}
+                </option>
+              </select>
+              <div class="field-info">选择商品的任务分类</div>
+            </div>
+            <div class="form-group">
               <label>图片文件:</label>
               <input type="file" @change="handleImageUpload" accept="image/*">
               <div class="field-info">上传商品图片，将存储到IPFS</div>
@@ -1317,7 +1335,7 @@ const taskCategoryOptions = [
               <select v-model="buyForm.itemId">
                 <option value="">-- 请选择商品 --</option>
                 <option v-for="item in marketData.allItems" :key="item.id" :value="item.id">
-                  {{ item.name }} - 价格: {{ formatEcnyBalance(item.price) }} eCNY - 可用数量: {{ item.availableQuantity }}
+                  {{ item.name }} - 价格: {{ formatPriceDisplay(item.price) }} eCNY - 可用数量: {{ item.availableQuantity }}
                 </option>
               </select>
             </div>
@@ -1335,9 +1353,9 @@ const taskCategoryOptions = [
             <div class="deposit-summary" v-if="buyForm.itemId">
               <h4>交易摘要:</h4>
               <p>商品名称: {{ marketData.allItems.find(item => item.id === buyForm.itemId)?.name }}</p>
-              <p>单价: {{ formatEcnyBalance(marketData.allItems.find(item => item.id === buyForm.itemId)?.price) }} eCNY</p>
+              <p>单价: {{ formatPriceDisplay(marketData.allItems.find(item => item.id === buyForm.itemId)?.price) }} eCNY</p>
               <p>买家保证金倍数: {{ buyForm.buyerDepositMultiplier }}</p>
-              <p>需支付保证金: {{ (Number(marketData.allItems.find(item => item.id === buyForm.itemId)?.price) * buyForm.buyerDepositMultiplier).toFixed(6) }} eCNY</p>
+              <p>需支付保证金: {{ formatPriceDisplay(Number(marketData.allItems.find(item => item.id === buyForm.itemId)?.price) * buyForm.buyerDepositMultiplier) }} eCNY</p>
             </div>
             <div class="form-actions">
               <button class="cancel-button" @click="showBuyForm = false">取消</button>
@@ -1646,22 +1664,17 @@ const taskCategoryOptions = [
             <div class="form-group">
               <label>国家:</label>
               <select v-model="item.country">
-                <option value="0">中国</option>
-                <option value="1">美国</option>
-                <option value="2">英国</option>
-                <option value="3">日本</option>
-                <option value="4">韩国</option>
-                <option value="5">其他</option>
+                <option v-for="option in countryOptions" :key="option.value" :value="option.value">
+                  {{ option.label }}
+                </option>
               </select>
             </div>
             <div class="form-group">
               <label>任务分类:</label>
               <select v-model="item.taskCategory">
-                <option value="0">服务</option>
-                <option value="1">实物</option>
-                <option value="2">数字产品</option>
-                <option value="3">任务</option>
-                <option value="4">其他</option>
+                <option v-for="option in taskCategoryOptions" :key="option.value" :value="option.value">
+                  {{ option.label }}
+                </option>
               </select>
             </div>
             <div class="form-group">

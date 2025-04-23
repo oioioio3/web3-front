@@ -154,17 +154,28 @@ export const getMarketStatus = async () => {
 /**
  * 上传文件到IPFS
  * @param {File} file - 要上传的文件
- * @returns {Promise<string>} - 返回IPFS哈希
+ * @param {string} name - NFT名称
+ * @param {string} description - NFT描述
+ * @param {Array} attributes - NFT属性，可选，例如[{"color": "red"}, {"size": "small"}]
+ * @returns {Promise<{metadataHash: string, assetHash: string}>} - 返回元数据哈希和资产哈希
  */
-export const uploadToIpfs = async (file) => {
+export const uploadToIpfs = async (file, name, description, attributes = []) => {
     try {
-        console.log(`开始上传文件 ${file.name} (${file.size} 字节) 到IPFS...`);
+        console.log(`开始上传NFT ${file.name} (${file.size} 字节) 到IPFS...`);
         
         const formData = new FormData();
         formData.append('file', file);
+        formData.append('name', name);
+        formData.append('description', description);
+        
+        // 如果有属性，添加到请求中
+        if (attributes && attributes.length > 0) {
+            const attributesJson = JSON.stringify(attributes);
+            formData.append('attributes', attributesJson);
+        }
         
         console.log("发送请求到IPFS API...");
-        const response = await fetch('http://127.0.0.1:8087/api/ipfs/upload', {
+        const response = await fetch('http://127.0.0.1:8087/api/ipfs/nft/upload', {
             method: 'POST',
             body: formData
         });
@@ -177,10 +188,15 @@ export const uploadToIpfs = async (file) => {
         const result = await response.json();
         console.log("IPFS服务器响应数据:", result);
         
-        // 修正：适配服务器实际返回的格式，成功状态码为200
-        if ((result.code === 200 || result.code === 0) && result.message === "文件上传成功" && result.data && result.data.ipfsHash) {
-            console.log(`文件上传成功，获取到IPFS哈希: ${result.data.ipfsHash}`);
-            return result.data.ipfsHash;
+        // 检查响应是否成功
+        if ((result.code === 200 || result.code === 0) && result.message === "NFT上传成功" && result.data) {
+            const { metadataHash, assetHash } = result.data;
+            console.log(`NFT上传成功，元数据哈希: ${metadataHash}, 资产哈希: ${assetHash}`);
+            
+            return {
+                metadataHash,
+                assetHash
+            };
         } else {
             // 服务器可能返回了其他错误情况
             const errorMsg = result.message || '上传IPFS失败，服务器未返回有效哈希';
@@ -368,9 +384,10 @@ export const publishItem = async (price, creatorDepositMultiplier, duration, ipf
  * @param {Array<string>} names - 商品名称数组
  * @param {Array<string>} descriptions - 商品描述数组
  * @param {Array<File>} imageFiles - 商品图片文件数组（可选）
+ * @param {Array<Array>} attributesArray - 商品属性数组的数组（可选）
  * @returns {Promise<Array<string>>} - 返回元数据的IPFS哈希数组
  */
-export const batchPrepareItemMetadata = async (names, descriptions, imageFiles = []) => {
+export const batchPrepareItemMetadata = async (names, descriptions, imageFiles = [], attributesArray = []) => {
     try {
         console.log("开始批量准备商品元数据...");
         console.log("商品数量:", names.length);
@@ -390,35 +407,16 @@ export const batchPrepareItemMetadata = async (names, descriptions, imageFiles =
         const uploadPromises = names.map(async (name, index) => {
             const description = descriptions[index];
             const imageFile = imageFiles.length > 0 ? imageFiles[index] : null;
+            const attributes = attributesArray.length > index ? attributesArray[index] : [];
             
             console.log(`准备第${index + 1}个商品元数据: ${name}`);
             
             try {
-                // 上传图片到IPFS（如果有）
-                let imageIpfsHash = '';
-                if (imageFile) {
-                    console.log(`上传第${index + 1}个商品图片到IPFS...`);
-                    imageIpfsHash = await uploadToIpfs(imageFile);
-                    console.log(`第${index + 1}个商品图片上传成功，IPFS哈希:`, imageIpfsHash);
-                }
+                // 直接上传NFT
+                const metadataHash = await prepareItemMetadata(name, description, imageFile, attributes);
+                console.log(`第${index + 1}个商品元数据上传成功，IPFS哈希:`, metadataHash);
                 
-                // 构建商品元数据
-                const metadata = {
-                    name,
-                    description,
-                    image: imageIpfsHash
-                };
-                
-                // 将元数据JSON转换为Blob并上传到IPFS
-                const metadataJson = JSON.stringify(metadata);
-                const metadataBlob = new Blob([metadataJson], { type: 'application/json' });
-                const metadataFile = new File([metadataBlob], `metadata_${index}.json`, { type: 'application/json' });
-                
-                // 上传元数据文件到IPFS
-                const metadataIpfsHash = await uploadToIpfs(metadataFile);
-                console.log(`第${index + 1}个商品元数据上传成功，IPFS哈希:`, metadataIpfsHash);
-                
-                return metadataIpfsHash;
+                return metadataHash;
             } catch (itemError) {
                 console.error(`处理第${index + 1}个商品元数据失败:`, itemError);
                 throw itemError; // 抛出错误以便Promise.all能够捕获
@@ -441,44 +439,33 @@ export const batchPrepareItemMetadata = async (names, descriptions, imageFiles =
  * @param {string} name - 商品名称
  * @param {string} description - 商品描述
  * @param {File} imageFile - 商品图片文件（可选）
+ * @param {Array} attributes - 商品属性，例如[{"trait_type": "color", "value": "red"}]（可选）
  * @returns {Promise<string>} - 返回元数据的IPFS哈希
  */
-export const prepareItemMetadata = async (name, description, imageFile) => {
+export const prepareItemMetadata = async (name, description, imageFile, attributes = []) => {
     try {
-        // 上传图片到IPFS（如果有）
-        let imageIpfsHash = '';
+        // 直接上传图片文件和元数据
         if (imageFile) {
-            console.log("开始上传图片到IPFS...", imageFile);
-            imageIpfsHash = await uploadToIpfs(imageFile);
-            console.log("图片上传成功，IPFS哈希:", imageIpfsHash);
+            console.log("开始上传NFT到IPFS...", imageFile);
+            const result = await uploadToIpfs(imageFile, name, description, attributes);
+            console.log("NFT上传成功，元数据哈希:", result.metadataHash, "资产哈希:", result.assetHash);
+            
+            // 返回元数据哈希用于合约存储
+            return result.metadataHash;
+        } else {
+            // 如果没有图片文件，创建一个只有元数据的NFT
+            // 创建空白图像作为占位符
+            const blankCanvas = document.createElement('canvas');
+            blankCanvas.width = 100;
+            blankCanvas.height = 100;
+            const blob = await new Promise(resolve => blankCanvas.toBlob(resolve));
+            const blankImageFile = new File([blob], 'blank.png', { type: 'image/png' });
+            
+            const result = await uploadToIpfs(blankImageFile, name, description, attributes);
+            console.log("无图像NFT上传成功，元数据哈希:", result.metadataHash);
+            
+            return result.metadataHash;
         }
-        
-        // 构建商品元数据
-        const metadata = {
-            name,
-            description,
-            image: imageIpfsHash
-        };
-        
-        console.log("准备的元数据:", metadata);
-        
-        // 将元数据JSON转换为Blob并上传到IPFS
-        console.log("准备上传元数据到IPFS...");
-        const metadataJson = JSON.stringify(metadata);
-        console.log("元数据JSON:", metadataJson);
-        
-        const metadataBlob = new Blob([metadataJson], { type: 'application/json' });
-        console.log("创建元数据Blob, 大小:", metadataBlob.size, "字节");
-        
-        const metadataFile = new File([metadataBlob], 'metadata.json', { type: 'application/json' });
-        console.log("创建元数据文件:", metadataFile.name, metadataFile.size, "字节");
-        
-        // 上传元数据文件到IPFS
-        const metadataIpfsHash = await uploadToIpfs(metadataFile);
-        console.log("元数据上传成功，IPFS哈希:", metadataIpfsHash);
-        
-        // 返回元数据的IPFS哈希
-        return metadataIpfsHash;
     } catch (error) {
         console.error("准备商品元数据失败:", error);
         throw error;
